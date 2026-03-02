@@ -17,3 +17,7 @@ venv/
 
 # Node
 node_modules/
+
+# App data
+cache/
+finnhub_key.txt

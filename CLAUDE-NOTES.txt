@@ -1,12 +1,47 @@
 # Hatch Research - Claude Notes
 
 ## Project Overview
-Stock research app to help narrow down share purchasing decisions on NASDAQ and NYSE via Hatch platform.
+Stock research web app for NASDAQ & NYSE shares (traded via Hatch platform NZ). Scores stocks on fundamentals weighted by research-backed predictive strength. Supports manual ticker lookup, side-by-side comparison, and full exchange scanning.
 
 ## Current State (2026-03-03)
-- Project initialised, planning phase
-- Discussing what factors/data to include
+- v1 complete: lookup, comparison, and scanner all working
+- Flask app on localhost:5001
+- yfinance for all stock data (no API key needed)
+- Finnhub for ticker lists (free key, optional — falls back to hardcoded list)
+- 24-hour cache in cache/ folder
+- Python path: C:\Users\Megan\AppData\Local\Programs\Python\Python312\python.exe
+
+## Key Files
+- `hatch_research.py` — Main app (data fetching, scoring, Flask routes)
+- `templates/dashboard.html` — Browser UI (dark theme)
+- `cache/` — Cached stock data as JSON (gitignored)
+- `finnhub_key.txt` — Optional Finnhub API key (gitignored)
+- `requirements.txt` — yfinance, flask, requests
+
+## Scoring System (100 points max)
+Weighted by research-backed predictive strength:
+- **Business Quality (35 pts)**: FCF margin (12), ROE (12), revenue growth (8), profit margin (3)
+- **Valuation (25 pts)**: PEG (10), forward P/E (8), P/B (4), trailing P/E (3)
+- **Financial Strength (20 pts)**: D/E (8), current ratio (6), FCF positive (6)
+- **Market Sentiment (20 pts)**: analyst buy% (8), price vs target (6), 52-wk position (6)
+- Dividends, beta, payout ratio shown but not scored (weak predictors)
+
+## Hatch Eligibility Filters
+- Market cap > $300M USD
+- Average daily volume > 100k shares
+- Listed on NASDAQ or NYSE
+
+## Data Sources
+- yfinance (Yahoo Finance): all fundamentals, analyst data, price data. No API key.
+- Finnhub (optional): full exchange ticker lists. Free key, 60 req/min, no daily cap.
+
+## Architecture
+- Flask web app on port 5001
+- Background threading for exchange scans
+- JSON file caching (24-hour validity)
+- Dark theme matching other projects
 
 ## Next Steps
-- Finalise feature set based on user preferences
-- Build the app
+- User to get free Finnhub API key for full exchange scanning
+- User testing and feedback on scoring thresholds
+- Potential: watchlist persistence, desktop shortcut, startup entry

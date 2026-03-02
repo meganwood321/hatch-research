@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hatch Research</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        header { text-align: center; margin-bottom: 24px; }
+        header h1 { font-size: 2em; color: #fff; margin-bottom: 4px; }
+        header p { color: #8892b0; font-size: 0.95em; }
+
+        .card {
+            background: rgba(255,255,255,0.06);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card h2 {
+            font-size: 1.1em; color: #fff; margin-bottom: 14px;
+            display: flex; align-items: center; gap: 8px;
+        }
+
+        /* Search bar */
+        .search-row {
+            display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+        }
+
+        .search-input {
+            flex: 1; min-width: 250px;
+            padding: 12px 16px; border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.08);
+            color: #fff; font-size: 1em;
+        }
+        .search-input::placeholder { color: #667; }
+        .search-input:focus { outline: none; border-color: #5dade2; }
+
+        button {
+            padding: 10px 20px; border: none; border-radius: 8px;
+            font-size: 0.9em; font-weight: 600; cursor: pointer;
+            transition: all 0.2s;
+        }
+        button:hover { transform: translateY(-1px); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+        .btn-primary { background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; }
+        .btn-scan { background: linear-gradient(135deg, #f7971e, #ffd200); color: #1a1a2e; }
+        .btn-danger { background: linear-gradient(135deg, #f5365c, #f56036); color: #fff; }
+        .btn-secondary {
+            background: rgba(255,255,255,0.1); color: #e0e0e0;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .btn-success { background: linear-gradient(135deg, #2ecc71, #27ae60); color: #fff; }
+        .btn-sm { padding: 6px 12px; font-size: 0.8em; }
+
+        /* Scan bar */
+        .scan-bar {
+            display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+        }
+
+        .progress-bar {
+            flex: 1; height: 8px; background: rgba(255,255,255,0.1);
+            border-radius: 4px; overflow: hidden; min-width: 150px;
+        }
+        .progress-fill {
+            height: 100%; background: linear-gradient(90deg, #667eea, #764ba2);
+            transition: width 0.3s; width: 0%;
+        }
+        .progress-text { font-size: 0.8em; color: #8892b0; min-width: 80px; }
+
+        /* Results table */
+        .results-table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+        .results-table th {
+            text-align: left; padding: 10px 8px;
+            border-bottom: 2px solid rgba(255,255,255,0.1);
+            color: #8892b0; font-size: 0.8em; text-transform: uppercase;
+            letter-spacing: 0.5px; cursor: pointer; user-select: none;
+            white-space: nowrap;
+        }
+        .results-table th:hover { color: #fff; }
+        .results-table td {
+            padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .results-table tr:hover td { background: rgba(255,255,255,0.03); }
+
+        .ticker-cell { font-weight: 700; color: #5dade2; }
+        .name-cell { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .sector-cell { font-size: 0.8em; color: #8892b0; }
+        .text-right { text-align: right; }
+
+        .score-badge {
+            display: inline-block; padding: 3px 8px; border-radius: 6px;
+            font-weight: 700; font-size: 0.85em;
+        }
+        .score-high { background: rgba(46,204,113,0.2); color: #2ecc71; }
+        .score-med { background: rgba(255,193,7,0.2); color: #ffc107; }
+        .score-low { background: rgba(255,107,107,0.2); color: #ff6b6b; }
+
+        .good { color: #2ecc71; }
+        .neutral { color: #ffc107; }
+        .bad { color: #ff6b6b; }
+        .muted { color: #667; }
+
+        /* Score breakdown tooltip */
+        .score-detail {
+            font-size: 0.75em; color: #8892b0; line-height: 1.4;
+        }
+
+        /* Comparison panel */
+        .compare-panel {
+            display: none; position: fixed; bottom: 0; left: 0; right: 0;
+            background: rgba(15,15,40,0.95); backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(255,255,255,0.1);
+            padding: 14px 20px; z-index: 100;
+        }
+        .compare-panel.show { display: flex; align-items: center; gap: 12px; }
+        .compare-chips { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; }
+        .compare-chip {
+            background: rgba(93,173,226,0.2); color: #5dade2;
+            padding: 4px 10px; border-radius: 6px; font-size: 0.85em;
+            font-weight: 600; display: flex; align-items: center; gap: 4px;
+        }
+        .compare-chip .remove {
+            cursor: pointer; opacity: 0.6; font-size: 1.1em;
+        }
+        .compare-chip .remove:hover { opacity: 1; }
+
+        /* Comparison table */
+        .compare-table { width: 100%; border-collapse: collapse; }
+        .compare-table th {
+            text-align: left; padding: 8px; color: #8892b0;
+            font-size: 0.8em; border-bottom: 1px solid rgba(255,255,255,0.1);
+            white-space: nowrap;
+        }
+        .compare-table td {
+            padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.05);
+            text-align: center;
+        }
+        .compare-table td:first-child { text-align: left; color: #8892b0; font-size: 0.85em; }
+
+        .cat-header {
+            background: rgba(255,255,255,0.03); font-weight: 600;
+            color: #5dade2 !important; font-size: 0.8em !important;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+
+        /* Empty state */
+        .empty { text-align: center; padding: 40px; color: #667; }
+        .empty h3 { color: #8892b0; margin-bottom: 8px; }
+
+        /* Toast */
+        .toast {
+            position: fixed; bottom: 20px; right: 20px;
+            padding: 14px 24px; border-radius: 10px; color: #fff;
+            font-weight: 600; z-index: 1000; opacity: 0;
+            transform: translateY(20px); transition: all 0.3s;
+        }
+        .toast.show { opacity: 1; transform: translateY(0); }
+        .toast-success { background: linear-gradient(135deg, #2ecc71, #27ae60); }
+        .toast-error { background: linear-gradient(135deg, #e74c3c, #c0392b); }
+        .toast-info { background: linear-gradient(135deg, #667eea, #764ba2); }
+
+        /* Loading spinner */
+        .spinner {
+            display: inline-block; width: 16px; height: 16px;
+            border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+            vertical-align: middle; margin-right: 6px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .section-toggle {
+            cursor: pointer; user-select: none;
+        }
+        .section-toggle:hover { color: #5dade2; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Hatch Research</h1>
+            <p>Stock research for NASDAQ & NYSE</p>
+        </header>
+
+        <!-- Ticker Lookup -->
+        <div class="card">
+            <h2>Ticker Lookup</h2>
+            <div class="search-row">
+                <input type="text" class="search-input" id="tickerInput"
+                       placeholder="Enter tickers separated by commas (e.g. AAPL, MSFT, GOOGL)"
+                       onkeydown="if(event.key==='Enter')lookupTickers()">
+                <button class="btn-primary" onclick="lookupTickers()" id="btnLookup">Look Up</button>
+                <button class="btn-secondary btn-sm" onclick="clearResults()">Clear</button>
+            </div>
+        </div>
+
+        <!-- Exchange Scanner -->
+        <div class="card">
+            <h2>Exchange Scanner</h2>
+            <div class="scan-bar">
+                <button class="btn-scan" onclick="startScan('NASDAQ')" id="btnNasdaq">Scan NASDAQ</button>
+                <button class="btn-scan" onclick="startScan('NYSE')" id="btnNyse">Scan NYSE</button>
+                <button class="btn-scan" onclick="startScan(null)" id="btnAll">Scan Both</button>
+                <button class="btn-danger btn-sm" onclick="stopScan()" id="btnStop" style="display:none">Stop</button>
+                <div class="progress-bar" id="progressBar" style="display:none">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <span class="progress-text" id="progressText"></span>
+                <button class="btn-secondary btn-sm" onclick="exportCSV()" id="btnExport" style="display:none">Export CSV</button>
+            </div>
+        </div>
+
+        <!-- Results -->
+        <div class="card" id="resultsCard">
+            <h2>
+                Results <span id="resultCount" style="color:#8892b0; font-size:0.8em"></span>
+            </h2>
+            <div id="resultsContent">
+                <div class="empty">
+                    <h3>No results yet</h3>
+                    <p>Enter a ticker above or scan an exchange to get started</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Comparison -->
+        <div class="card" id="compareCard" style="display:none">
+            <h2>
+                Side-by-Side Comparison
+                <button class="btn-secondary btn-sm" onclick="clearComparison()">Clear</button>
+            </h2>
+            <div id="compareContent"></div>
+        </div>
+    </div>
+
+    <!-- Compare bar (fixed bottom) -->
+    <div class="compare-panel" id="comparePanel">
+        <span style="color:#8892b0; font-size:0.85em">Compare:</span>
+        <div class="compare-chips" id="compareChips"></div>
+        <button class="btn-primary btn-sm" onclick="showComparison()">Compare</button>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let compareList = [];
+        let currentResults = [];
+        let pollTimer = null;
+
+        function showToast(msg, type = 'info') {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = 'toast toast-' + type + ' show';
+            setTimeout(() => t.classList.remove('show'), 4000);
+        }
+
+        function fmtNum(v, dec = 2) {
+            if (v === null || v === undefined || v === '') return '-';
+            return Number(v).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+        }
+
+        function fmtPct(v) {
+            if (v === null || v === undefined) return '-';
+            return (v * 100).toFixed(1) + '%';
+        }
+
+        function fmtBig(v) {
+            if (!v) return '-';
+            if (v >= 1e12) return '$' + (v / 1e12).toFixed(1) + 'T';
+            if (v >= 1e9) return '$' + (v / 1e9).toFixed(1) + 'B';
+            if (v >= 1e6) return '$' + (v / 1e6).toFixed(0) + 'M';
+            return '$' + fmtNum(v, 0);
+        }
+
+        function scoreClass(score) {
+            if (score >= 60) return 'score-high';
+            if (score >= 35) return 'score-med';
+            return 'score-low';
+        }
+
+        function colorVal(val, goodBelow, badAbove) {
+            if (val === null || val === undefined) return 'muted';
+            if (goodBelow !== undefined && val < goodBelow) return 'good';
+            if (badAbove !== undefined && val > badAbove) return 'bad';
+            return 'neutral';
+        }
+
+        function colorValHigh(val, goodAbove, badBelow) {
+            if (val === null || val === undefined) return 'muted';
+            if (goodAbove !== undefined && val > goodAbove) return 'good';
+            if (badBelow !== undefined && val < badBelow) return 'bad';
+            return 'neutral';
+        }
+
+        // -- Lookup --
+        async function lookupTickers() {
+            const input = document.getElementById('tickerInput').value.trim();
+            if (!input) return;
+
+            const btn = document.getElementById('btnLookup');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>Loading...';
+
+            try {
+                const resp = await fetch('/lookup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tickers: input })
+                });
+                const data = await resp.json();
+
+                if (data.status === 'ok') {
+                    currentResults = data.results.filter(r => !r.error);
+                    renderResults(currentResults);
+                    if (data.results.some(r => r.error)) {
+                        const bad = data.results.filter(r => r.error).map(r => r.ticker).join(', ');
+                        showToast('Not found: ' + bad, 'error');
+                    }
+                } else {
+                    showToast(data.message || 'Lookup failed', 'error');
+                }
+            } catch (err) {
+                showToast('Error: ' + err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Look Up';
+            }
+        }
+
+        function clearResults() {
+            currentResults = [];
+            document.getElementById('resultsContent').innerHTML =
+                '<div class="empty"><h3>No results yet</h3><p>Enter a ticker above or scan an exchange to get started</p></div>';
+            document.getElementById('resultCount').textContent = '';
+        }
+
+        // -- Scanner --
+        async function startScan(exchange) {
+            try {
+                const resp = await fetch('/scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ exchange })
+                });
+                const data = await resp.json();
+                if (data.status === 'ok') {
+                    showToast('Scan started...', 'info');
+                    document.getElementById('btnStop').style.display = '';
+                    document.getElementById('progressBar').style.display = '';
+                    document.getElementById('btnExport').style.display = 'none';
+                    pollProgress();
+                } else {
+                    showToast(data.message, 'error');
+                }
+            } catch (err) {
+                showToast('Error: ' + err.message, 'error');
+            }
+        }
+
+        async function stopScan() {
+            await fetch('/scan/stop', { method: 'POST' });
+            showToast('Scan stopped', 'info');
+        }
+
+        function pollProgress() {
+            if (pollTimer) clearInterval(pollTimer);
+            pollTimer = setInterval(async () => {
+                try {
+                    const resp = await fetch('/scan/progress');
+                    const data = await resp.json();
+
+                    const pct = data.total > 0 ? (data.processed / data.total * 100) : 0;
+                    document.getElementById('progressFill').style.width = pct + '%';
+                    document.getElementById('progressText').textContent =
+                        `${data.processed}/${data.total} (${data.resultCount} found)`;
+
+                    if (!data.running) {
+                        clearInterval(pollTimer);
+                        document.getElementById('btnStop').style.display = 'none';
+                        document.getElementById('btnExport').style.display = '';
+
+                        if (data.error) {
+                            showToast('Scan error: ' + data.error, 'error');
+                        } else {
+                            showToast(`Scan complete: ${data.resultCount} stocks scored`, 'success');
+                            loadScanResults();
+                        }
+                    }
+                } catch (err) {
+                    clearInterval(pollTimer);
+                }
+            }, 2000);
+        }
+
+        async function loadScanResults() {
+            const resp = await fetch('/scan/results?limit=100');
+            const data = await resp.json();
+            if (data.status === 'ok') {
+                currentResults = data.results;
+                renderResults(data.results);
+            }
+        }
+
+        function exportCSV() {
+            window.open('/export', '_blank');
+        }
+
+        // -- Render Results Table --
+        function renderResults(results) {
+            if (!results.length) {
+                document.getElementById('resultsContent').innerHTML =
+                    '<div class="empty"><h3>No results</h3></div>';
+                document.getElementById('resultCount').textContent = '';
+                return;
+            }
+
+            document.getElementById('resultCount').textContent = `(${results.length})`;
+
+            let html = `<table class="results-table">
+                <thead><tr>
+                    <th onclick="sortResults('score')" style="width:60px">Score</th>
+                    <th onclick="sortResults('ticker')">Ticker</th>
+                    <th onclick="sortResults('name')">Name</th>
+                    <th onclick="sortResults('sector')">Sector</th>
+                    <th onclick="sortResults('price')" class="text-right">Price</th>
+                    <th onclick="sortResults('marketCap')" class="text-right">Mkt Cap</th>
+                    <th onclick="sortResults('returnOnEquity')" class="text-right">ROE</th>
+                    <th onclick="sortResults('revenueGrowth')" class="text-right">Rev Gr.</th>
+                    <th onclick="sortResults('freeCashflow')" class="text-right">FCF</th>
+                    <th onclick="sortResults('forwardPE')" class="text-right">Fwd P/E</th>
+                    <th onclick="sortResults('pegRatio')" class="text-right">PEG</th>
+                    <th onclick="sortResults('debtToEquity')" class="text-right">D/E</th>
+                    <th onclick="sortResults('targetMeanPrice')" class="text-right">Target</th>
+                    <th style="width:70px"></th>
+                </tr></thead><tbody>`;
+
+            for (const r of results) {
+                const score = r.score ? r.score.total : 0;
+                const inCompare = compareList.includes(r.ticker);
+
+                html += `<tr>
+                    <td><span class="score-badge ${scoreClass(score)}">${score}</span></td>
+                    <td class="ticker-cell">${r.ticker}</td>
+                    <td class="name-cell" title="${r.name || ''}">${r.name || '-'}</td>
+                    <td class="sector-cell">${r.sector || '-'}</td>
+                    <td class="text-right">$${fmtNum(r.price)}</td>
+                    <td class="text-right">${fmtBig(r.marketCap)}</td>
+                    <td class="text-right ${colorValHigh(r.returnOnEquity, 0.15, 0.05)}">${fmtPct(r.returnOnEquity)}</td>
+                    <td class="text-right ${colorValHigh(r.revenueGrowth, 0.10, 0)}">${fmtPct(r.revenueGrowth)}</td>
+                    <td class="text-right ${r.freeCashflow > 0 ? 'good' : 'bad'}">${fmtBig(r.freeCashflow)}</td>
+                    <td class="text-right ${colorVal(r.forwardPE, 15, 30)}">${fmtNum(r.forwardPE, 1)}</td>
+                    <td class="text-right ${colorVal(r.pegRatio, 1, 2)}">${fmtNum(r.pegRatio, 2)}</td>
+                    <td class="text-right ${colorVal(r.debtToEquity, 50, 150)}">${fmtNum(r.debtToEquity, 0)}</td>
+                    <td class="text-right">$${fmtNum(r.targetMeanPrice)}</td>
+                    <td>
+                        <button class="btn-sm ${inCompare ? 'btn-danger' : 'btn-secondary'}"
+                                onclick="toggleCompare('${r.ticker}')">
+                            ${inCompare ? 'Remove' : '+ Compare'}
+                        </button>
+                    </td>
+                </tr>`;
+            }
+
+            html += '</tbody></table>';
+            document.getElementById('resultsContent').innerHTML = html;
+        }
+
+        let sortField = 'score';
+        let sortAsc = false;
+
+        function sortResults(field) {
+            if (sortField === field) {
+                sortAsc = !sortAsc;
+            } else {
+                sortField = field;
+                sortAsc = field === 'ticker' || field === 'name' || field === 'sector';
+            }
+
+            currentResults.sort((a, b) => {
+                let va, vb;
+                if (field === 'score') {
+                    va = a.score ? a.score.total : 0;
+                    vb = b.score ? b.score.total : 0;
+                } else {
+                    va = a[field]; vb = b[field];
+                }
+                if (va === null || va === undefined) va = sortAsc ? Infinity : -Infinity;
+                if (vb === null || vb === undefined) vb = sortAsc ? Infinity : -Infinity;
+                if (typeof va === 'string') return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+                return sortAsc ? va - vb : vb - va;
+            });
+
+            renderResults(currentResults);
+        }
+
+        // -- Compare --
+        function toggleCompare(ticker) {
+            const idx = compareList.indexOf(ticker);
+            if (idx >= 0) {
+                compareList.splice(idx, 1);
+            } else {
+                if (compareList.length >= 8) {
+                    showToast('Max 8 stocks for comparison', 'error');
+                    return;
+                }
+                compareList.push(ticker);
+            }
+            updateComparePanel();
+            renderResults(currentResults);
+        }
+
+        function updateComparePanel() {
+            const panel = document.getElementById('comparePanel');
+            const chips = document.getElementById('compareChips');
+
+            if (compareList.length === 0) {
+                panel.classList.remove('show');
+                return;
+            }
+
+            panel.classList.add('show');
+            chips.innerHTML = compareList.map(t =>
+                `<span class="compare-chip">${t}
+                    <span class="remove" onclick="toggleCompare('${t}')">&times;</span>
+                </span>`
+            ).join('');
+        }
+
+        async function showComparison() {
+            if (compareList.length < 2) {
+                showToast('Select at least 2 stocks to compare', 'error');
+                return;
+            }
+
+            const resp = await fetch('/compare', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tickers: compareList })
+            });
+            const data = await resp.json();
+
+            if (data.status === 'ok') {
+                renderComparison(data.results);
+            }
+        }
+
+        function renderComparison(results) {
+            const card = document.getElementById('compareCard');
+            card.style.display = '';
+
+            const metrics = [
+                { cat: 'Overview', items: [] },
+                { label: 'Price', key: 'price', fmt: v => '$' + fmtNum(v) },
+                { label: 'Market Cap', key: 'marketCap', fmt: fmtBig },
+                { label: 'Sector', key: 'sector', fmt: v => v || '-' },
+                { label: 'Score', key: '_score', fmt: v => v },
+
+                { cat: 'Business Quality (35 pts)', items: [] },
+                { label: 'ROE', key: 'returnOnEquity', fmt: fmtPct, goodHigh: true, threshHigh: 0.15, threshLow: 0.05 },
+                { label: 'Revenue Growth', key: 'revenueGrowth', fmt: fmtPct, goodHigh: true, threshHigh: 0.10, threshLow: 0 },
+                { label: 'Free Cash Flow', key: 'freeCashflow', fmt: fmtBig, goodHigh: true, threshHigh: 1, threshLow: 0 },
+                { label: 'Net Profit Margin', key: 'profitMargins', fmt: fmtPct, goodHigh: true, threshHigh: 0.15, threshLow: 0 },
+
+                { cat: 'Financial Strength (20 pts)', items: [] },
+                { label: 'Debt/Equity', key: 'debtToEquity', fmt: v => fmtNum(v, 0), goodLow: true, threshLow: 50, threshHigh: 150 },
+                { label: 'Current Ratio', key: 'currentRatio', fmt: v => fmtNum(v, 2), goodHigh: true, threshHigh: 1.5, threshLow: 1.0 },
+
+                { cat: 'Valuation (25 pts)', items: [] },
+                { label: 'PEG Ratio', key: 'pegRatio', fmt: v => fmtNum(v, 2), goodLow: true, threshLow: 1, threshHigh: 2 },
+                { label: 'Forward P/E', key: 'forwardPE', fmt: v => fmtNum(v, 1), goodLow: true, threshLow: 15, threshHigh: 30 },
+                { label: 'Trailing P/E', key: 'trailingPE', fmt: v => fmtNum(v, 1), goodLow: true, threshLow: 18, threshHigh: 30 },
+                { label: 'Price/Book', key: 'priceToBook', fmt: v => fmtNum(v, 2), goodLow: true, threshLow: 3, threshHigh: 8 },
+
+                { cat: 'Market Sentiment (20 pts)', items: [] },
+                { label: 'Analyst Target', key: 'targetMeanPrice', fmt: v => '$' + fmtNum(v) },
+                { label: 'Analyst Opinions', key: 'numberOfAnalystOpinions', fmt: v => v || '-' },
+                { label: '52-wk High', key: 'fiftyTwoWeekHigh', fmt: v => '$' + fmtNum(v) },
+                { label: '52-wk Low', key: 'fiftyTwoWeekLow', fmt: v => '$' + fmtNum(v) },
+
+                { cat: 'Informational (not scored)', items: [] },
+                { label: 'Dividend Yield', key: 'dividendYield', fmt: fmtPct },
+                { label: 'Payout Ratio', key: 'payoutRatio', fmt: fmtPct },
+                { label: 'Beta', key: 'beta', fmt: v => fmtNum(v, 2) },
+            ];
+
+            let html = `<table class="compare-table">
+                <thead><tr><th></th>`;
+            for (const r of results) {
+                html += `<th style="text-align:center"><span class="ticker-cell">${r.ticker}</span><br>
+                    <span style="font-size:0.7em; color:#667">${(r.name || '').substring(0, 20)}</span></th>`;
+            }
+            html += '</tr></thead><tbody>';
+
+            for (const m of metrics) {
+                if (m.cat) {
+                    html += `<tr><td colspan="${results.length + 1}" class="cat-header">${m.cat}</td></tr>`;
+                    continue;
+                }
+
+                html += `<tr><td>${m.label}</td>`;
+                for (const r of results) {
+                    let val = m.key === '_score' ? (r.score ? r.score.total : 0) : r[m.key];
+                    let cls = '';
+
+                    if (m.key === '_score') {
+                        cls = scoreClass(val);
+                        html += `<td><span class="score-badge ${cls}">${val}</span></td>`;
+                        continue;
+                    }
+
+                    if (m.goodHigh && val !== null && val !== undefined) {
+                        cls = val > m.threshHigh ? 'good' : val < m.threshLow ? 'bad' : 'neutral';
+                    } else if (m.goodLow && val !== null && val !== undefined) {
+                        cls = val < m.threshLow ? 'good' : val > m.threshHigh ? 'bad' : 'neutral';
+                    }
+
+                    const display = val !== null && val !== undefined ? m.fmt(val) : '-';
+                    html += `<td class="${cls}">${display}</td>`;
+                }
+                html += '</tr>';
+            }
+
+            html += '</tbody></table>';
+            document.getElementById('compareContent').innerHTML = html;
+
+            // Scroll to comparison
+            card.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function clearComparison() {
+            compareList = [];
+            updateComparePanel();
+            document.getElementById('compareCard').style.display = 'none';
+            renderResults(currentResults);
+        }
+    </script>
+</body>
+</html>
