@@ -1,0 +1,12 @@
+# Hatch Research - Claude Notes
+
+## Project Overview
+Stock research app to help narrow down share purchasing decisions on NASDAQ and NYSE via Hatch platform.
+
+## Current State (2026-03-03)
+- Project initialised, planning phase
+- Discussing what factors/data to include
+
+## Next Steps
+- Finalise feature set based on user preferences
+- Build the app
