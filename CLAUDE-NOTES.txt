@@ -3,28 +3,36 @@
 ## Project Overview
 Stock research web app for NASDAQ & NYSE shares (traded via Hatch platform NZ). Scores stocks on fundamentals weighted by research-backed predictive strength. Supports manual ticker lookup, side-by-side comparison, and full exchange scanning.
 
-## Current State (2026-04-06)
-- v1.1: scanner rebuilt for speed (was taking hours, now minutes)
+## Current State (2026-04-07)
+- v1.2: added news sentiment analysis feature
 - Flask app on localhost:5001
 - yfinance for all stock data (no API key needed)
-- **Curated ticker universe**: S&P 500 + Russell 1000 fetched from Wikipedia
-  via pandas.read_html, cached 7 days in cache/curated_tickers.json. Falls
-  back to embedded list if Wikipedia fetch fails. Finnhub no longer needed
-  for scanning (still referenced in code but unused by scanner).
+- **Curated ticker universe**: S&P 500/400/600 + Russell 1000/2000 fetched
+  from Wikipedia via pandas.read_html, cached 7 days in
+  cache/curated_tickers.json (~2500 tickers). Falls back to embedded list
+  if Wikipedia fetch fails.
 - **Parallel scanning**: ThreadPoolExecutor with SCAN_WORKERS=10
 - **Skip recommendations during scan**: halves per-ticker fetch time; full
   data (incl. analyst recs) is still fetched for lookup/compare routes
 - **Ineligibility cache**: cache/ineligible.json tracks tickers known to be
   below $300M mcap / 100k volume, 30-day TTL. Subsequent scans skip these.
+- **News Sentiment**: FinBERT-powered sentiment analysis on Finnhub articles.
+  Shows overall sentiment, daily trend chart, source breakdown, and
+  article list with per-article scores. Triggered on ticker lookup or via
+  "News" button in results table. Cached 6 hours per ticker.
+  - Relevance filter: drops articles that don't mention the ticker/company
+  - Article links use Google search (Finnhub free tier URLs are broken)
+  - Falls back to keyword-based sentiment if FinBERT not available
 - 24-hour cache for stock data in cache/ folder
 - Python path: C:\Users\Megan\AppData\Local\Programs\Python\Python312\python.exe
 
 ## Key Files
 - `hatch_research.py` — Main app (data fetching, scoring, Flask routes)
+- `news_sentiment.py` — FinBERT sentiment engine (fetch, score, aggregate, cache)
 - `templates/dashboard.html` — Browser UI (dark theme)
-- `cache/` — Cached stock data as JSON (gitignored)
-- `finnhub_key.txt` — Optional Finnhub API key (gitignored)
-- `requirements.txt` — yfinance, flask, requests
+- `cache/` — Cached stock data + news sentiment as JSON (gitignored)
+- `finnhub_key.txt` — Finnhub API key (needed for news sentiment; gitignored)
+- `requirements.txt` — yfinance, flask, requests, lxml, transformers, torch
 
 ## Scoring System (100 points max)
 Weighted by research-backed predictive strength:
@@ -49,8 +57,19 @@ Weighted by research-backed predictive strength:
 - JSON file caching (24-hour validity)
 - Dark theme matching other projects
 
+## What Was Done This Session (2026-04-07)
+- Rebuilt scanner: curated index lists, parallel fetching, ineligibility cache
+  → Scan time from hours to <60 seconds
+- Expanded curated universe to ~2500 tickers (S&P 500/400/600 + Russell 1000/2000)
+- Fixed Wikipedia 403 (added User-Agent header)
+- Fixed colorValHigh() missing JS function (scan results weren't rendering)
+- Added news sentiment feature: FinBERT + Finnhub articles
+- Added relevance filter for news (Finnhub returns irrelevant articles)
+- Fixed article links (Finnhub URLs broken, using Google search instead)
+
 ## Next Steps
-- User testing — verify scan time is now reasonable (target: <5 min first run, <1 min cached)
+- User testing of sentiment feature across more tickers
 - Feedback on scoring thresholds
 - Potential: watchlist persistence, desktop shortcut, startup entry
 - Potential: tune SCAN_WORKERS if yfinance rate-limits under load
+- Potential: Marketaux fallback for tickers with sparse Finnhub coverage

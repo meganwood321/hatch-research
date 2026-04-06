@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import yfinance as yf
+from news_sentiment import analyze_ticker_news
 import requests
 from flask import Flask, render_template, request, jsonify
 
@@ -809,6 +810,20 @@ def export_csv():
         mimetype='text/csv',
         headers={'Content-Disposition': f'attachment; filename=hatch_research_{datetime.now().strftime("%Y%m%d")}.csv'}
     )
+
+
+@app.route('/api/news-sentiment/<ticker>')
+def news_sentiment(ticker):
+    """Get news sentiment analysis for a ticker."""
+    result = analyze_ticker_news(ticker.upper())
+    return jsonify(result)
+
+
+@app.route('/api/news-sentiment/<ticker>/refresh')
+def news_sentiment_refresh(ticker):
+    """Force-refresh news sentiment (bypass cache)."""
+    result = analyze_ticker_news(ticker.upper(), force_refresh=True)
+    return jsonify(result)
 
 
 # -- Main -------------------------------------------------------------------

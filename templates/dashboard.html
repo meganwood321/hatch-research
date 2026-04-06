@@ -228,6 +228,70 @@
         .modal-body p { margin: 5px 0; font-size: 0.85em; }
         .change-summary { background: rgba(255,255,255,0.05); padding: 10px; border-radius: 6px; margin-bottom: 15px; }
         .score-breakdown, .factor-details { background: rgba(255,255,255,0.03); padding: 10px; border-radius: 6px; margin-bottom: 10px; }
+
+        /* News Sentiment */
+        .sentiment-badge {
+            display: inline-block; padding: 4px 12px; border-radius: 6px;
+            font-weight: 700; font-size: 0.85em; text-transform: uppercase;
+        }
+        .sentiment-bullish { background: rgba(46,204,113,0.2); color: #2ecc71; }
+        .sentiment-bearish { background: rgba(255,107,107,0.2); color: #ff6b6b; }
+        .sentiment-neutral { background: rgba(255,193,7,0.2); color: #ffc107; }
+
+        .sentiment-header {
+            display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+        }
+        .sentiment-summary {
+            display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+        }
+        .sentiment-score-big {
+            font-size: 1.8em; font-weight: 700;
+        }
+        .sentiment-meta { font-size: 0.8em; color: #8892b0; }
+
+        .sentiment-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px;
+        }
+        @media (max-width: 800px) { .sentiment-grid { grid-template-columns: 1fr; } }
+
+        .sentiment-panel { background: rgba(255,255,255,0.03); border-radius: 8px; padding: 14px; }
+        .sentiment-panel h3 { font-size: 0.85em; color: #8892b0; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+
+        .trend-chart { width: 100%; height: 120px; }
+        .trend-bar { fill: #667eea; rx: 2; }
+        .trend-bar.positive { fill: #2ecc71; }
+        .trend-bar.negative { fill: #ff6b6b; }
+        .trend-label { fill: #667; font-size: 9px; text-anchor: middle; }
+        .trend-zero { stroke: rgba(255,255,255,0.15); stroke-dasharray: 4,4; }
+
+        .source-table { width: 100%; border-collapse: collapse; font-size: 0.82em; }
+        .source-table td { padding: 5px 8px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .source-table td:last-child { text-align: right; }
+
+        .article-list { max-height: 400px; overflow-y: auto; }
+        .article-item {
+            padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.05);
+            display: flex; gap: 10px; align-items: flex-start;
+        }
+        .article-item:hover { background: rgba(255,255,255,0.03); }
+        .article-sentiment {
+            min-width: 50px; text-align: center; padding: 2px 6px;
+            border-radius: 4px; font-size: 0.75em; font-weight: 700;
+        }
+        .article-body { flex: 1; }
+        .article-headline {
+            color: #5dade2; font-weight: 600; font-size: 0.9em;
+            text-decoration: none; display: block; margin-bottom: 3px;
+        }
+        .article-headline:hover { text-decoration: underline; }
+        .article-meta { font-size: 0.75em; color: #667; }
+        .article-summary { font-size: 0.8em; color: #8892b0; margin-top: 4px; line-height: 1.4; }
+
+        .collapsible-toggle {
+            cursor: pointer; user-select: none; font-size: 0.75em;
+            color: #5dade2; margin-left: 8px;
+        }
+        .collapsible-toggle:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -275,6 +339,19 @@
                     <h3>No results yet</h3>
                     <p>Enter a ticker above or scan an exchange to get started</p>
                 </div>
+            </div>
+        </div>
+
+        <!-- News Sentiment -->
+        <div class="card" id="sentimentCard" style="display:none">
+            <div class="sentiment-header">
+                <h2>News Sentiment <span id="sentimentTicker" style="color:#5dade2"></span></h2>
+                <div>
+                    <button class="btn-secondary btn-sm" onclick="refreshSentiment()" id="btnRefreshSentiment">Refresh</button>
+                </div>
+            </div>
+            <div id="sentimentContent">
+                <div class="empty"><div class="spinner"></div> Analysing news sentiment...</div>
             </div>
         </div>
 
@@ -453,6 +530,10 @@
                 if (data.status === 'ok') {
                     currentResults = data.results.filter(r => !r.error);
                     renderResults(currentResults);
+                    // Auto-load sentiment for the first valid ticker
+                    if (currentResults.length > 0) {
+                        loadSentiment(currentResults[0].ticker);
+                    }
                     if (data.results.some(r => r.error)) {
                         const bad = data.results.filter(r => r.error).map(r => r.ticker).join(', ');
                         showToast('Not found: ' + bad, 'error');
@@ -602,7 +683,9 @@
                     <td class="text-right ${colorVal(r.pegRatio, 1, 2)}">${fmtNum(r.pegRatio, 2)}</td>
                     <td class="text-right ${colorVal(r.debtToEquity, 50, 150)}">${fmtNum(r.debtToEquity, 0)}</td>
                     <td class="text-right">$${fmtNum(r.targetMeanPrice)}</td>
-                    <td>
+                    <td style="white-space:nowrap">
+                        <button class="btn-sm btn-secondary" style="margin-right:4px"
+                                onclick="loadSentiment('${r.ticker}')">News</button>
                         <button class="btn-sm ${inCompare ? 'btn-danger' : 'btn-secondary'}"
                                 onclick="toggleCompare('${r.ticker}')">
                             ${inCompare ? 'Remove' : '+ Compare'}
@@ -808,6 +891,179 @@
         function hideModal() {
             const modal = document.getElementById('scoreModal');
             if (modal) modal.style.display = 'none';
+        }
+
+        // -- News Sentiment ------------------------------------------------
+
+        let currentSentimentTicker = null;
+
+        function loadSentiment(ticker) {
+            currentSentimentTicker = ticker;
+            const card = document.getElementById('sentimentCard');
+            card.style.display = '';
+            document.getElementById('sentimentTicker').textContent = ticker;
+            document.getElementById('sentimentContent').innerHTML =
+                '<div class="empty"><div class="spinner"></div> Analysing news sentiment...</div>';
+
+            fetch(`/api/news-sentiment/${ticker}`)
+                .then(r => r.json())
+                .then(data => renderSentiment(data))
+                .catch(err => {
+                    document.getElementById('sentimentContent').innerHTML =
+                        `<div class="empty">Failed to load sentiment: ${err.message}</div>`;
+                });
+        }
+
+        function refreshSentiment() {
+            if (!currentSentimentTicker) return;
+            const ticker = currentSentimentTicker;
+            document.getElementById('sentimentContent').innerHTML =
+                '<div class="empty"><div class="spinner"></div> Refreshing...</div>';
+            fetch(`/api/news-sentiment/${ticker}/refresh`)
+                .then(r => r.json())
+                .then(data => renderSentiment(data))
+                .catch(err => {
+                    document.getElementById('sentimentContent').innerHTML =
+                        `<div class="empty">Failed to refresh: ${err.message}</div>`;
+                });
+        }
+
+        function renderSentiment(data) {
+            const el = document.getElementById('sentimentContent');
+
+            if (data.error) {
+                el.innerHTML = `<div class="empty">${data.message || data.error}</div>`;
+                return;
+            }
+
+            if (data.article_count === 0) {
+                el.innerHTML = '<div class="empty">No recent news articles found for this ticker</div>';
+                return;
+            }
+
+            const s = data.overall_sentiment;
+            const badgeClass = `sentiment-${s.label}`;
+            const scoreColor = s.score > 0 ? '#2ecc71' : s.score < 0 ? '#ff6b6b' : '#ffc107';
+
+            let html = `
+                <div class="sentiment-summary">
+                    <div>
+                        <span class="sentiment-score-big" style="color:${scoreColor}">${s.score > 0 ? '+' : ''}${s.score.toFixed(2)}</span>
+                    </div>
+                    <div>
+                        <span class="sentiment-badge ${badgeClass}">${s.label}</span>
+                    </div>
+                    <div class="sentiment-meta">
+                        ${data.article_count} articles over ${data.trend.length} days
+                        &middot; Model: ${data.model || 'unknown'}
+                    </div>
+                </div>
+
+                <div class="sentiment-grid">
+                    <div class="sentiment-panel">
+                        <h3>Sentiment Trend (${data.trend.length} days)</h3>
+                        ${renderTrendChart(data.trend)}
+                    </div>
+                    <div class="sentiment-panel">
+                        <h3>Source Breakdown</h3>
+                        ${renderSourceTable(data.source_breakdown)}
+                    </div>
+                </div>
+
+                <div style="margin-top:16px">
+                    <h3 style="font-size:0.85em; color:#8892b0; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px;">
+                        Recent Articles
+                        <span class="collapsible-toggle" onclick="toggleArticles()">[show/hide]</span>
+                    </h3>
+                    <div class="article-list" id="articleList">
+                        ${renderArticleList(data.articles)}
+                    </div>
+                </div>`;
+
+            el.innerHTML = html;
+        }
+
+        function renderTrendChart(trend) {
+            if (!trend.length) return '<div class="empty" style="padding:10px">No trend data</div>';
+
+            const w = 400, h = 100, pad = 20;
+            const maxAbs = Math.max(0.3, ...trend.map(t => Math.abs(t.score)));
+            const barW = Math.max(8, Math.min(30, (w - pad * 2) / trend.length - 2));
+            const chartW = trend.length * (barW + 2) + pad * 2;
+
+            let svg = `<svg class="trend-chart" viewBox="0 0 ${chartW} ${h + 25}" preserveAspectRatio="xMinYMid meet">`;
+
+            // Zero line
+            const zeroY = h / 2;
+            svg += `<line x1="${pad}" y1="${zeroY}" x2="${chartW - pad}" y2="${zeroY}" class="trend-zero"/>`;
+
+            trend.forEach((t, i) => {
+                const x = pad + i * (barW + 2);
+                const barH = (Math.abs(t.score) / maxAbs) * (h / 2 - 5);
+                const y = t.score >= 0 ? zeroY - barH : zeroY;
+                const cls = t.score >= 0 ? 'positive' : 'negative';
+
+                svg += `<rect class="trend-bar ${cls}" x="${x}" y="${y}" width="${barW}" height="${Math.max(1, barH)}" title="${t.date}: ${t.score.toFixed(2)} (${t.count} articles)">
+                    <title>${t.date}: ${t.score > 0 ? '+' : ''}${t.score.toFixed(2)} (${t.count} articles)</title>
+                </rect>`;
+
+                // Date label (show every 2-3 days to avoid clutter)
+                if (i === 0 || i === trend.length - 1 || i % Math.ceil(trend.length / 5) === 0) {
+                    const label = t.date.substring(5); // MM-DD
+                    svg += `<text class="trend-label" x="${x + barW / 2}" y="${h + 15}">${label}</text>`;
+                }
+            });
+
+            svg += '</svg>';
+            return svg;
+        }
+
+        function renderSourceTable(sources) {
+            if (!sources.length) return '<div class="muted" style="font-size:0.85em">No source data</div>';
+
+            let html = '<table class="source-table">';
+            for (const s of sources) {
+                const cls = `sentiment-${s.label}`;
+                const scoreColor = s.avg_score > 0 ? '#2ecc71' : s.avg_score < 0 ? '#ff6b6b' : '#ffc107';
+                html += `<tr>
+                    <td>${s.source}</td>
+                    <td>${s.count} article${s.count !== 1 ? 's' : ''}</td>
+                    <td><span style="color:${scoreColor};font-weight:600">${s.avg_score > 0 ? '+' : ''}${s.avg_score.toFixed(2)}</span></td>
+                    <td><span class="sentiment-badge ${cls}" style="font-size:0.7em;padding:2px 6px">${s.label}</span></td>
+                </tr>`;
+            }
+            html += '</table>';
+            return html;
+        }
+
+        function renderArticleList(articles) {
+            if (!articles.length) return '<div class="muted">No articles</div>';
+
+            let html = '';
+            for (const a of articles) {
+                const s = a.sentiment;
+                const cls = `sentiment-${s.label}`;
+                const scoreColor = s.score > 0 ? '#2ecc71' : s.score < 0 ? '#ff6b6b' : '#ffc107';
+                const date = new Date(a.datetime).toLocaleDateString('en-NZ', { month: 'short', day: 'numeric' });
+
+                // Finnhub free tier returns broken redirect URLs, so link to a Google search instead
+                const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(a.headline + ' ' + a.source);
+
+                html += `<div class="article-item">
+                    <div class="article-sentiment ${cls}">${s.score > 0 ? '+' : ''}${s.score.toFixed(2)}</div>
+                    <div class="article-body">
+                        <a href="${searchUrl}" target="_blank" rel="noopener" class="article-headline">${a.headline}</a>
+                        <div class="article-meta">${a.source} &middot; ${date}</div>
+                        ${a.summary ? `<div class="article-summary">${a.summary.substring(0, 200)}${a.summary.length > 200 ? '...' : ''}</div>` : ''}
+                    </div>
+                </div>`;
+            }
+            return html;
+        }
+
+        function toggleArticles() {
+            const el = document.getElementById('articleList');
+            el.style.display = el.style.display === 'none' ? '' : 'none';
         }
     </script>
 </body>
