@@ -8,6 +8,7 @@ import json
 import time
 import threading
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -21,13 +22,18 @@ CACHE_DIR = Path('cache')
 CACHE_DIR.mkdir(exist_ok=True)
 CACHE_HOURS = 24  # How long cached data stays valid
 FINNHUB_KEY_FILE = 'finnhub_key.txt'
+CURATED_TICKERS_FILE = CACHE_DIR / 'curated_tickers.json'
+CURATED_TTL_DAYS = 7
+INELIGIBLE_FILE = CACHE_DIR / 'ineligible.json'
+INELIGIBLE_TTL_DAYS = 30
 
 # Hatch eligibility criteria
 MIN_MARKET_CAP = 300_000_000   # $300M USD
 MIN_AVG_VOLUME = 100_000       # 100k shares/day
 
-# Rate limiting for yfinance
+# Rate limiting for yfinance (lookup route only; scan uses thread pool)
 FETCH_DELAY = 0.5  # seconds between yfinance calls
+SCAN_WORKERS = 10  # Parallel workers during exchange scan
 
 app = Flask(__name__)
 
@@ -63,15 +69,26 @@ def get_cached(ticker):
 
 
 def save_cache(ticker, data):
-    """Save stock data to cache."""
+    """Save stock data to cache with change tracking."""
+    # Store previous score before updating
+    if 'score' in data:
+        data['_previous_score'] = data.get('score')
+
     data['_cached_at'] = datetime.now().isoformat()
     cache_path(ticker).write_text(json.dumps(data, default=str))
 
 
 # -- Data Fetching ----------------------------------------------------------
 
-def fetch_stock_data(ticker):
-    """Fetch comprehensive stock data via yfinance."""
+def fetch_stock_data(ticker, skip_recommendations=False):
+    """Fetch comprehensive stock data via yfinance.
+
+    Args:
+        ticker: Stock ticker symbol.
+        skip_recommendations: If True, skip the extra HTTP call for analyst
+            recommendations. Used during bulk scans to roughly halve fetch time;
+            the lookup/compare routes fetch full data.
+    """
     cached = get_cached(ticker)
     if cached:
         return cached
@@ -83,18 +100,19 @@ def fetch_stock_data(ticker):
         if not info or info.get('quoteType') not in ('EQUITY', None) or not info.get('marketCap'):
             return None
 
-        # Pull analyst recommendations
+        # Pull analyst recommendations (skipped during scans for speed)
         analyst_rec = {'strongBuy': 0, 'buy': 0, 'hold': 0, 'sell': 0, 'strongSell': 0}
-        try:
-            recs = stock.recommendations
-            if recs is not None and len(recs) > 0:
-                latest = recs.iloc[-1] if hasattr(recs, 'iloc') else None
-                if latest is not None:
-                    for key in analyst_rec:
-                        if key in latest:
-                            analyst_rec[key] = int(latest[key])
-        except Exception:
-            pass
+        if not skip_recommendations:
+            try:
+                recs = stock.recommendations
+                if recs is not None and len(recs) > 0:
+                    latest = recs.iloc[-1] if hasattr(recs, 'iloc') else None
+                    if latest is not None:
+                        for key in analyst_rec:
+                            if key in latest:
+                                analyst_rec[key] = int(latest[key])
+            except Exception:
+                pass
 
         data = {
             'ticker': ticker.upper(),
@@ -161,34 +179,133 @@ def get_finnhub_key():
     return None
 
 
-def fetch_exchange_tickers(exchange='US'):
-    """Fetch ticker list from Finnhub."""
-    key = get_finnhub_key()
-    if not key:
-        return get_fallback_tickers()
+def get_curated_tickers():
+    """Load curated ticker universe covering large, mid, and small caps.
 
+    Pulls from six Wikipedia index pages and merges/dedupes:
+      - S&P 500        (~500 large caps)
+      - S&P 400        (~400 mid caps)
+      - S&P 600        (~600 small caps)
+      - Russell 1000   (~1,000 large/mid caps)
+      - Russell 2000   (~2,000 small caps)
+
+    Result is cached to disk for CURATED_TTL_DAYS. Falls back to an embedded
+    list of well-known large caps if all network fetches fail.
+    """
+    # Try cache first
+    if CURATED_TICKERS_FILE.exists():
+        try:
+            cached = json.loads(CURATED_TICKERS_FILE.read_text())
+            cached_at = datetime.fromisoformat(cached.get('_cached_at', '2000-01-01'))
+            if datetime.now() - cached_at < timedelta(days=CURATED_TTL_DAYS):
+                print(f"  Using cached curated list: {len(cached.get('tickers', []))} tickers")
+                return cached.get('tickers', [])
+        except Exception:
+            pass
+
+    tickers = set()
+
+    # Fetch Wikipedia pages with a real user-agent (Wikipedia 403s the default).
+    # Then hand the HTML to pandas.read_html for table parsing.
     try:
-        url = f"https://finnhub.io/api/v1/stock/symbol?exchange={exchange}&token={key}"
-        resp = requests.get(url, timeout=30)
-        resp.raise_for_status()
-        symbols = resp.json()
+        import pandas as pd
+        from io import StringIO
 
-        # Filter to common stocks only (not warrants, preferred, etc.)
-        tickers = []
-        for s in symbols:
-            sym = s.get('symbol', '')
-            stype = s.get('type', '')
-            # Skip symbols with dots (preferred shares), warrants, etc.
-            if '.' in sym or '-' in sym or len(sym) > 5:
-                continue
-            if stype in ('Common Stock', 'EQS', ''):
-                tickers.append(sym)
+        wiki_headers = {
+            'User-Agent': 'HatchResearch/1.2 (https://github.com/meganwood321; personal research tool)'
+        }
 
-        return sorted(set(tickers))
+        def _fetch_wiki(url):
+            resp = requests.get(url, headers=wiki_headers, timeout=30)
+            resp.raise_for_status()
+            return pd.read_html(StringIO(resp.text))
+
+        def _extract_tickers(tables, ticker_cols=('symbol', 'ticker')):
+            """Pull ticker symbols from whichever column matches."""
+            found = set()
+            for tbl in tables:
+                cols = [str(c).lower() for c in tbl.columns]
+                for target in ticker_cols:
+                    matching = [c for c in tbl.columns if str(c).lower() == target]
+                    if matching:
+                        for sym in tbl[matching[0]].tolist():
+                            s = str(sym).replace('.', '-').strip().upper()
+                            if (s and s.lower() != 'nan'
+                                    and 1 <= len(s) <= 6
+                                    and s.replace('-', '').isalpha()):
+                                found.add(s)
+                        return found  # Found the right table, stop
+            return found
+
+        # Each source: (label, URL)
+        sources = [
+            ('S&P 500',     'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'),
+            ('S&P 400',     'https://en.wikipedia.org/wiki/List_of_S%26P_400_companies'),
+            ('S&P 600',     'https://en.wikipedia.org/wiki/List_of_S%26P_600_companies'),
+            ('Russell 1000', 'https://en.wikipedia.org/wiki/Russell_1000_Index'),
+            ('Russell 2000', 'https://en.wikipedia.org/wiki/Russell_2000_Index'),
+        ]
+
+        for label, url in sources:
+            try:
+                tables = _fetch_wiki(url)
+                before = len(tickers)
+                found = _extract_tickers(tables)
+                tickers.update(found)
+                added = len(tickers) - before
+                print(f"  {label}: +{added} new tickers (total: {len(tickers)})")
+            except Exception as e:
+                print(f"  {label} fetch failed: {e}")
 
     except Exception as e:
-        print(f"  Finnhub error: {e}, using fallback list")
-        return get_fallback_tickers()
+        print(f"  pandas.read_html unavailable: {e}")
+
+    # Fallback to embedded list if network fetch gave us nothing useful
+    if len(tickers) < 100:
+        print("  Falling back to embedded large-cap list")
+        tickers.update(get_fallback_tickers())
+
+    result = sorted(tickers)
+    print(f"  Total curated universe: {len(result)} tickers")
+
+    try:
+        CURATED_TICKERS_FILE.write_text(json.dumps({
+            '_cached_at': datetime.now().isoformat(),
+            'tickers': result
+        }))
+    except Exception:
+        pass
+    return result
+
+
+def load_ineligible():
+    """Load the set of tickers previously found to be Hatch-ineligible.
+
+    These get skipped on subsequent scans to avoid re-fetching stocks we
+    already know are too small / illiquid. Expires after INELIGIBLE_TTL_DAYS
+    so companies that have grown get re-checked periodically.
+    """
+    if not INELIGIBLE_FILE.exists():
+        return set()
+    try:
+        data = json.loads(INELIGIBLE_FILE.read_text())
+        cached_at = datetime.fromisoformat(data.get('_cached_at', '2000-01-01'))
+        if datetime.now() - cached_at > timedelta(days=INELIGIBLE_TTL_DAYS):
+            return set()
+        return set(data.get('tickers', []))
+    except Exception:
+        return set()
+
+
+def save_ineligible(tickers):
+    """Persist the known-ineligible set."""
+    try:
+        INELIGIBLE_FILE.write_text(json.dumps({
+            '_cached_at': datetime.now().isoformat(),
+            'tickers': sorted(tickers)
+        }))
+    except Exception as e:
+        print(f"  Failed to save ineligible cache: {e}")
 
 
 def get_fallback_tickers():
@@ -208,7 +325,7 @@ def get_fallback_tickers():
 
 # -- Scoring Engine ---------------------------------------------------------
 
-def score_stock(data):
+def score_stock(data, previous_score=None):
     """Score a stock on a 0-100 scale based on fundamentals."""
     scores = {
         'business_quality': 0,
@@ -439,17 +556,47 @@ def score_stock(data):
         details['52wkPosition'] = {'value': position, 'pts': pts, 'max': 6}
 
     total = sum(scores.values())
+
+    # Calculate changes if previous score exists
+    changes = None
+    if previous_score:
+        changes = {
+            'total': total - previous_score.get('total', 0),
+            'categories': {
+                cat: scores[cat] - previous_score.get('categories', {}).get(cat, 0)
+                for cat in scores.keys()
+            },
+            'details': {}
+        }
+
+        # Calculate detailed factor changes
+        prev_details = previous_score.get('details', {})
+        for factor, current in details.items():
+            prev = prev_details.get(factor)
+            if prev:
+                changes['details'][factor] = {
+                    'value': current['value'] - prev.get('value', 0),
+                    'pts': current['pts'] - prev.get('pts', 0)
+                }
+
     return {
         'total': total,
         'categories': scores,
-        'details': details
+        'details': details,
+        'changes': changes
     }
 
 
 # -- Background Scanner ----------------------------------------------------
 
 def run_scan(exchange_filter=None):
-    """Run a full exchange scan in the background."""
+    """Run a full exchange scan in the background.
+
+    Uses a curated S&P 500 + Russell 1000 universe (not the whole exchange),
+    a persistent ineligibility cache, and a thread pool to fetch tickers in
+    parallel. Typical scan time: a few minutes on first run, under a minute
+    on subsequent runs once the cache is warm.
+    """
     global scan_state
     scan_state['running'] = True
     scan_state['error'] = None
@@ -458,53 +605,82 @@ def run_scan(exchange_filter=None):
     scan_state['finished'] = None
     scan_state['exchange'] = exchange_filter or 'ALL'
 
+    state_lock = threading.Lock()
+
     try:
-        # Get all tickers
-        all_tickers = fetch_exchange_tickers('US')
-        scan_state['total'] = len(all_tickers)
+        all_tickers = get_curated_tickers()
+        ineligible = load_ineligible()
+
+        # Skip tickers we already know are too small / illiquid
+        tickers_to_scan = [t for t in all_tickers if t not in ineligible]
+        skipped = len(all_tickers) - len(tickers_to_scan)
+        if skipped:
+            print(f"  Skipping {skipped} tickers from ineligibility cache")
+        print(f"  Scanning {len(tickers_to_scan)} tickers with {SCAN_WORKERS} workers")
+
+        scan_state['total'] = len(tickers_to_scan)
         scan_state['processed'] = 0
 
         scored_stocks = []
+        new_ineligible = set()
 
-        for i, ticker in enumerate(all_tickers):
+        def process_ticker(ticker):
+            """Fetch + score one ticker. Returns (status, payload)."""
             if not scan_state['running']:
-                break  # Allow cancellation
-
-            scan_state['processed'] = i + 1
-
+                return ('cancelled', ticker)
             try:
-                data = fetch_stock_data(ticker)
+                data = fetch_stock_data(ticker, skip_recommendations=True)
                 if data is None:
-                    continue
+                    return ('no_data', ticker)
 
-                # Hatch eligibility filter
                 mcap = data.get('marketCap', 0)
                 vol = data.get('avgVolume', 0)
                 if mcap < MIN_MARKET_CAP or vol < MIN_AVG_VOLUME:
-                    continue
+                    return ('ineligible', ticker)
 
-                # Exchange filter
                 if exchange_filter:
                     exch = data.get('exchange', '').upper()
                     if exchange_filter == 'NASDAQ' and 'NAS' not in exch and 'NMS' not in exch and 'NGM' not in exch:
-                        continue
+                        return ('wrong_exchange', ticker)
                     if exchange_filter == 'NYSE' and 'NYS' not in exch and 'NYQ' not in exch:
-                        continue
+                        return ('wrong_exchange', ticker)
 
-                score = score_stock(data)
+                score = score_stock(data, data.get('score'))
                 data['score'] = score
-                scored_stocks.append(data)
-
+                return ('ok', data)
             except Exception as e:
                 print(f"  Scan error for {ticker}: {e}")
+                return ('error', ticker)
 
-            # Rate limiting
-            if not get_cached(ticker):
-                time.sleep(FETCH_DELAY)
+        with ThreadPoolExecutor(max_workers=SCAN_WORKERS) as executor:
+            futures = {executor.submit(process_ticker, t): t for t in tickers_to_scan}
+            for future in as_completed(futures):
+                if not scan_state['running']:
+                    # User cancelled — stop waiting on remaining futures
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
+                try:
+                    status, payload = future.result()
+                except Exception as e:
+                    print(f"  Future error: {e}")
+                    status, payload = 'error', None
+
+                with state_lock:
+                    scan_state['processed'] += 1
+
+                if status == 'ok':
+                    scored_stocks.append(payload)
+                elif status == 'ineligible':
+                    new_ineligible.add(payload)
 
         # Sort by score descending
         scored_stocks.sort(key=lambda x: x.get('score', {}).get('total', 0), reverse=True)
         scan_state['results'] = scored_stocks
+
+        # Persist the updated ineligibility cache so future scans are faster
+        if new_ineligible:
+            save_ineligible(ineligible | new_ineligible)
+            print(f"  Added {len(new_ineligible)} tickers to ineligibility cache")
 
     except Exception as e:
         scan_state['error'] = str(e)
@@ -533,7 +709,7 @@ def lookup():
     for ticker in tickers[:20]:  # Max 20 at once
         stock_data = fetch_stock_data(ticker)
         if stock_data:
-            stock_data['score'] = score_stock(stock_data)
+            stock_data['score'] = score_stock(stock_data, stock_data.get('score'))
             results.append(stock_data)
         else:
             results.append({'ticker': ticker, 'error': 'Not found or no data'})
@@ -597,7 +773,7 @@ def compare():
     for ticker in tickers[:10]:
         stock_data = fetch_stock_data(ticker)
         if stock_data:
-            stock_data['score'] = score_stock(stock_data)
+            stock_data['score'] = score_stock(stock_data, stock_data.get('score'))
             results.append(stock_data)
 
     return jsonify({'status': 'ok', 'results': results})
@@ -645,17 +821,19 @@ if __name__ == '__main__':
     print("|  Press Ctrl+C to stop                    |")
     print("+==========================================+\n")
 
-    # Check for Finnhub key
-    if get_finnhub_key():
-        print("  Finnhub API key loaded (full exchange scanning enabled)")
-    else:
-        print("  No Finnhub key found (using fallback ticker list)")
-        print("  To enable full scanning, save your free key to finnhub_key.txt")
-
     print(f"  Cache directory: {CACHE_DIR.absolute()}")
     cached_count = len(list(CACHE_DIR.glob('*.json')))
     if cached_count:
         print(f"  Cached stocks: {cached_count}")
+    if CURATED_TICKERS_FILE.exists():
+        try:
+            ct = json.loads(CURATED_TICKERS_FILE.read_text())
+            print(f"  Curated ticker list: {len(ct.get('tickers', []))} stocks (S&P 500 + Russell 1000)")
+        except Exception:
+            pass
+    ineligible = load_ineligible()
+    if ineligible:
+        print(f"  Ineligibility cache: {len(ineligible)} tickers will be skipped on next scan")
     print()
 
     webbrowser.open('http://localhost:5001')

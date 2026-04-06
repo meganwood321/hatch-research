@@ -111,6 +111,13 @@
         .score-med { background: rgba(255,193,7,0.2); color: #ffc107; }
         .score-low { background: rgba(255,107,107,0.2); color: #ff6b6b; }
 
+        .score-change {
+            margin-left: 4px; font-size: 0.7em; font-weight: 600;
+            padding: 1px 3px; border-radius: 3px;
+        }
+        .change-up { background: rgba(46,204,113,0.3); color: #2ecc71; }
+        .change-down { background: rgba(245,101,101,0.3); color: #f56565; }
+
         .good { color: #2ecc71; }
         .neutral { color: #ffc107; }
         .bad { color: #ff6b6b; }
@@ -188,6 +195,39 @@
             cursor: pointer; user-select: none;
         }
         .section-toggle:hover { color: #5dade2; }
+
+        /* Score details modal */
+        #scoreModal {
+            display: none; position: fixed; z-index: 1000; left: 0; top: 0;
+            width: 100%; height: 100%;
+        }
+        .modal-backdrop {
+            position: absolute; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7); backdrop-filter: blur(5px);
+        }
+        .modal-content {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(15,15,40,0.95); backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 12px;
+            padding: 0; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;
+        }
+        .modal-header {
+            padding: 15px 20px; border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex; justify-content: flex-end;
+        }
+        .modal-close {
+            cursor: pointer; font-size: 24px; color: #8892b0;
+            transition: color 0.2s;
+        }
+        .modal-close:hover { color: #fff; }
+        .modal-body {
+            padding: 20px; color: #e0e0e0;
+        }
+        .modal-body h3 { color: #fff; margin-bottom: 15px; }
+        .modal-body h4 { color: #5dade2; margin: 15px 0 8px 0; font-size: 0.9em; }
+        .modal-body p { margin: 5px 0; font-size: 0.85em; }
+        .change-summary { background: rgba(255,255,255,0.05); padding: 10px; border-radius: 6px; margin-bottom: 15px; }
+        .score-breakdown, .factor-details { background: rgba(255,255,255,0.03); padding: 10px; border-radius: 6px; margin-bottom: 10px; }
     </style>
 </head>
 <body>
@@ -305,6 +345,92 @@
             if (goodAbove !== undefined && val > goodAbove) return 'good';
             if (badBelow !== undefined && val < badBelow) return 'bad';
             return 'neutral';
+        }
+
+        function getChangeDetails(changes) {
+            if (!changes) return '';
+            let details = [];
+            for (const [factor, change] of Object.entries(changes.details || {})) {
+                if (change.pts !== 0) {
+                    const factorName = {
+                        'fcf': 'FCF Margin',
+                        'roe': 'ROE',
+                        'revGrowth': 'Revenue Growth',
+                        'margin': 'Profit Margin',
+                        'debtEquity': 'Debt/Equity',
+                        'currentRatio': 'Current Ratio',
+                        'fcfPositive': 'FCF Positive',
+                        'peg': 'PEG Ratio',
+                        'forwardPE': 'Forward P/E',
+                        'priceBook': 'Price/Book',
+                        'pe': 'P/E Ratio',
+                        'analystBuyPct': 'Analyst Consensus',
+                        'upside': 'Price Upside',
+                        '52wkPosition': '52W Position'
+                    }[factor] || factor;
+                    details.push(`${factorName}: ${change.pts > 0 ? '+' : ''}${change.pts}pts`);
+                }
+            }
+            return details.join('\n');
+        }
+
+        function showScoreDetails(ticker, scoreData) {
+            const score = JSON.parse(scoreData);
+            let html = `<h3>${ticker} Score Breakdown</h3>`;
+
+            if (score.changes) {
+                html += `<div class="change-summary">
+                    <h4>Recent Changes</h4>
+                    <p>Total: <span class="${score.changes.total > 0 ? 'good' : 'bad'}">${score.changes.total > 0 ? '+' : ''}${score.changes.total} points</span></p>`;
+
+                for (const [category, change] of Object.entries(score.changes.categories)) {
+                    if (change !== 0) {
+                        const catName = category.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+                        html += `<p>${catName}: <span class="${change > 0 ? 'good' : 'bad'}">${change > 0 ? '+' : ''}${change} points</span></p>`;
+                    }
+                }
+
+                html += `</div>`;
+            }
+
+            html += `<div class="score-breakdown">
+                <h4>Current Categories</h4>
+                <p>Business Quality: ${score.categories.business_quality}/35</p>
+                <p>Financial Strength: ${score.categories.financial_strength}/20</p>
+                <p>Valuation: ${score.categories.valuation}/25</p>
+                <p>Market Sentiment: ${score.categories.market_sentiment}/20</p>
+            </div>`;
+
+            if (score.details) {
+                html += `<div class="factor-details"><h4>Factor Details</h4>`;
+                const factorNames = {
+                    'fcf': 'FCF Margin',
+                    'roe': 'ROE',
+                    'revGrowth': 'Revenue Growth',
+                    'margin': 'Profit Margin',
+                    'debtEquity': 'Debt/Equity',
+                    'currentRatio': 'Current Ratio',
+                    'fcfPositive': 'FCF Positive',
+                    'peg': 'PEG Ratio',
+                    'forwardPE': 'Forward P/E',
+                    'priceBook': 'Price/Book',
+                    'pe': 'P/E Ratio',
+                    'analystBuyPct': 'Analyst Buy %',
+                    'upside': 'Price Upside',
+                    '52wkPosition': '52W Position'
+                };
+
+                for (const [factor, detail] of Object.entries(score.details)) {
+                    const name = factorNames[factor] || factor;
+                    const value = typeof detail.value === 'number' ?
+                        (detail.value < 1 ? fmtPct(detail.value) : fmtNum(detail.value, 2)) :
+                        detail.value;
+                    html += `<p>${name}: ${value} (${detail.pts}/${detail.max}pts)</p>`;
+                }
+                html += `</div>`;
+            }
+
+            showModal(html);
         }
 
         // -- Lookup --
@@ -451,10 +577,19 @@
 
             for (const r of results) {
                 const score = r.score ? r.score.total : 0;
+                const changes = r.score ? r.score.changes : null;
                 const inCompare = compareList.includes(r.ticker);
 
+                let changeHtml = '';
+                if (changes && changes.total !== 0) {
+                    const changeClass = changes.total > 0 ? 'change-up' : 'change-down';
+                    const changeIcon = changes.total > 0 ? '↗' : '↘';
+                    const changeTitle = `Changed by ${changes.total > 0 ? '+' : ''}${changes.total} points\n${getChangeDetails(changes)}`;
+                    changeHtml = `<span class="score-change ${changeClass}" title="${changeTitle}">${changeIcon}${Math.abs(changes.total)}</span>`;
+                }
+
                 html += `<tr>
-                    <td><span class="score-badge ${scoreClass(score)}">${score}</span></td>
+                    <td><span class="score-badge ${scoreClass(score)}" onclick="showScoreDetails('${r.ticker}', ${JSON.stringify(r.score).replace(/"/g, '&quot;')})">${score}</span>${changeHtml}</td>
                     <td class="ticker-cell">${r.ticker}</td>
                     <td class="name-cell" title="${r.name || ''}">${r.name || '-'}</td>
                     <td class="sector-cell">${r.sector || '-'}</td>
@@ -647,6 +782,32 @@
             updateComparePanel();
             document.getElementById('compareCard').style.display = 'none';
             renderResults(currentResults);
+        }
+
+        // Score details modal
+        function showModal(content) {
+            let modal = document.getElementById('scoreModal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'scoreModal';
+                modal.innerHTML = `
+                    <div class="modal-backdrop" onclick="hideModal()"></div>
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <span class="modal-close" onclick="hideModal()">&times;</span>
+                        </div>
+                        <div class="modal-body"></div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            }
+            modal.querySelector('.modal-body').innerHTML = content;
+            modal.style.display = 'block';
+        }
+
+        function hideModal() {
+            const modal = document.getElementById('scoreModal');
+            if (modal) modal.style.display = 'none';
         }
     </script>
 </body>
