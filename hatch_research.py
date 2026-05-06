@@ -32,9 +32,11 @@ INELIGIBLE_TTL_DAYS = 30
 MIN_MARKET_CAP = 300_000_000   # $300M USD
 MIN_AVG_VOLUME = 100_000       # 100k shares/day
 
-# Rate limiting for yfinance (lookup route only; scan uses thread pool)
-FETCH_DELAY = 0.5  # seconds between yfinance calls
-SCAN_WORKERS = 10  # Parallel workers during exchange scan
+# Rate limiting for yfinance
+FETCH_DELAY = 0.5  # seconds between yfinance calls (lookup route)
+SCAN_WORKERS = 5   # Parallel workers during exchange scan (10 triggers Yahoo rate limits)
+RETRY_ATTEMPTS = 3 # Retries on rate-limit errors
+RETRY_DELAY = 5    # Seconds to wait between retries
 
 app = Flask(__name__)
 
@@ -94,81 +96,89 @@ def fetch_stock_data(ticker, skip_recommendations=False):
     if cached:
         return cached
 
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
+    for attempt in range(1, RETRY_ATTEMPTS + 1):
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
 
-        if not info or info.get('quoteType') not in ('EQUITY', None) or not info.get('marketCap'):
+            if not info or info.get('quoteType') not in ('EQUITY', None) or not info.get('marketCap'):
+                return None
+
+            # Pull analyst recommendations (skipped during scans for speed)
+            analyst_rec = {'strongBuy': 0, 'buy': 0, 'hold': 0, 'sell': 0, 'strongSell': 0}
+            if not skip_recommendations:
+                try:
+                    recs = stock.recommendations
+                    if recs is not None and len(recs) > 0:
+                        latest = recs.iloc[-1] if hasattr(recs, 'iloc') else None
+                        if latest is not None:
+                            for key in analyst_rec:
+                                if key in latest:
+                                    analyst_rec[key] = int(latest[key])
+                except Exception:
+                    pass
+
+            data = {
+                'ticker': ticker.upper(),
+                'name': info.get('longName') or info.get('shortName', ticker),
+                'sector': info.get('sector', 'Unknown'),
+                'industry': info.get('industry', 'Unknown'),
+                'exchange': info.get('exchange', ''),
+
+                # Price
+                'price': info.get('currentPrice') or info.get('regularMarketPrice', 0),
+                'fiftyTwoWeekHigh': info.get('fiftyTwoWeekHigh', 0),
+                'fiftyTwoWeekLow': info.get('fiftyTwoWeekLow', 0),
+                'marketCap': info.get('marketCap', 0),
+                'avgVolume': info.get('averageVolume', 0),
+
+                # Valuation
+                'trailingPE': info.get('trailingPE'),
+                'forwardPE': info.get('forwardPE'),
+                'pegRatio': info.get('pegRatio'),
+                'priceToBook': info.get('priceToBook'),
+
+                # Business Quality
+                'revenueGrowth': info.get('revenueGrowth'),
+                'profitMargins': info.get('profitMargins'),
+                'returnOnEquity': info.get('returnOnEquity'),
+                'freeCashflow': info.get('freeCashflow'),
+                'totalRevenue': info.get('totalRevenue'),
+
+                # Financial Strength
+                'debtToEquity': info.get('debtToEquity'),
+                'currentRatio': info.get('currentRatio'),
+
+                # Dividends (informational)
+                'dividendYield': info.get('dividendYield'),
+                'payoutRatio': info.get('payoutRatio'),
+
+                # Risk
+                'beta': info.get('beta'),
+
+                # Analyst
+                'targetMeanPrice': info.get('targetMeanPrice'),
+                'targetMedianPrice': info.get('targetMedianPrice'),
+                'targetHighPrice': info.get('targetHighPrice'),
+                'targetLowPrice': info.get('targetLowPrice'),
+                'numberOfAnalystOpinions': info.get('numberOfAnalystOpinions', 0),
+                'recommendationKey': info.get('recommendationKey', ''),
+                'analystRec': analyst_rec,
+            }
+
+            save_cache(ticker, data)
+            return data
+
+        except Exception as e:
+            err_str = str(e).lower()
+            if ('rate' in err_str or 'too many' in err_str) and attempt < RETRY_ATTEMPTS:
+                time.sleep(RETRY_DELAY * attempt)  # Progressive backoff
+                continue
+            if attempt == RETRY_ATTEMPTS and ('rate' in err_str or 'too many' in err_str):
+                print(f"  Error fetching {ticker}: rate limited after {RETRY_ATTEMPTS} retries")
+            else:
+                print(f"  Error fetching {ticker}: {e}")
             return None
-
-        # Pull analyst recommendations (skipped during scans for speed)
-        analyst_rec = {'strongBuy': 0, 'buy': 0, 'hold': 0, 'sell': 0, 'strongSell': 0}
-        if not skip_recommendations:
-            try:
-                recs = stock.recommendations
-                if recs is not None and len(recs) > 0:
-                    latest = recs.iloc[-1] if hasattr(recs, 'iloc') else None
-                    if latest is not None:
-                        for key in analyst_rec:
-                            if key in latest:
-                                analyst_rec[key] = int(latest[key])
-            except Exception:
-                pass
-
-        data = {
-            'ticker': ticker.upper(),
-            'name': info.get('longName') or info.get('shortName', ticker),
-            'sector': info.get('sector', 'Unknown'),
-            'industry': info.get('industry', 'Unknown'),
-            'exchange': info.get('exchange', ''),
-
-            # Price
-            'price': info.get('currentPrice') or info.get('regularMarketPrice', 0),
-            'fiftyTwoWeekHigh': info.get('fiftyTwoWeekHigh', 0),
-            'fiftyTwoWeekLow': info.get('fiftyTwoWeekLow', 0),
-            'marketCap': info.get('marketCap', 0),
-            'avgVolume': info.get('averageVolume', 0),
-
-            # Valuation
-            'trailingPE': info.get('trailingPE'),
-            'forwardPE': info.get('forwardPE'),
-            'pegRatio': info.get('pegRatio'),
-            'priceToBook': info.get('priceToBook'),
-
-            # Business Quality
-            'revenueGrowth': info.get('revenueGrowth'),
-            'profitMargins': info.get('profitMargins'),
-            'returnOnEquity': info.get('returnOnEquity'),
-            'freeCashflow': info.get('freeCashflow'),
-            'totalRevenue': info.get('totalRevenue'),
-
-            # Financial Strength
-            'debtToEquity': info.get('debtToEquity'),
-            'currentRatio': info.get('currentRatio'),
-
-            # Dividends (informational)
-            'dividendYield': info.get('dividendYield'),
-            'payoutRatio': info.get('payoutRatio'),
-
-            # Risk
-            'beta': info.get('beta'),
-
-            # Analyst
-            'targetMeanPrice': info.get('targetMeanPrice'),
-            'targetMedianPrice': info.get('targetMedianPrice'),
-            'targetHighPrice': info.get('targetHighPrice'),
-            'targetLowPrice': info.get('targetLowPrice'),
-            'numberOfAnalystOpinions': info.get('numberOfAnalystOpinions', 0),
-            'recommendationKey': info.get('recommendationKey', ''),
-            'analystRec': analyst_rec,
-        }
-
-        save_cache(ticker, data)
-        return data
-
-    except Exception as e:
-        print(f"  Error fetching {ticker}: {e}")
-        return None
 
 
 # -- Ticker Lists -----------------------------------------------------------
