@@ -21,7 +21,7 @@ echo Copying scan_results.json to your Desktop...
 copy /Y "scan_results.json" "D:\Users\Megan\OneDrive\Desktop\scan_results.json" >nul
 echo Done! scan_results.json is now on your Desktop.
 echo.
-echo Drag it onto the Value Screen tab at:
+echo Drag scan_results.json onto the Value Screen tab at:
 echo https://meganwood321.github.io/hatch-mobile/
 echo.
 pause

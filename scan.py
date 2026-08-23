@@ -20,7 +20,7 @@ RESULTS_JSON = Path('scan_results.json')
 RESULTS_CSV  = Path('scan_results.csv')
 CACHE_DIR    = Path('cache')
 CACHE_HOURS  = 24
-WORKERS      = 5
+WORKERS      = 8
 RETRY        = 3
 RETRY_DELAY  = 5
 
@@ -54,7 +54,7 @@ WIKI_HEADERS = {
 }
 
 def get_tickers():
-    """Fetch S&P 100 + NASDAQ 100 from Wikipedia, fall back to hardcoded list."""
+    """Fetch S&P 500 from Wikipedia, fall back to hardcoded list."""
     tickers = set()
     try:
         import pandas as pd
@@ -66,7 +66,7 @@ def get_tickers():
             return pd.read_html(StringIO(r.text))
 
         sources = [
-            ('S&P 100',    'https://en.wikipedia.org/wiki/S%26P_100'),
+            ('S&P 500',    'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'),
             ('NASDAQ 100', 'https://en.wikipedia.org/wiki/Nasdaq-100'),
         ]
         for label, url in sources:
@@ -74,7 +74,7 @@ def get_tickers():
                 tables = _wiki(url)
                 for tbl in tables:
                     for col in tbl.columns:
-                        if str(col).lower() in ('symbol','ticker'):
+                        if str(col).lower() in ('symbol', 'ticker', 'ticker symbol'):
                             for sym in tbl[col].tolist():
                                 s = str(sym).replace('.', '-').strip().upper()
                                 if s and s.lower() != 'nan' and 1 <= len(s) <= 6:
