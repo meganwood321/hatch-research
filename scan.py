@@ -65,16 +65,18 @@ def get_tickers():
             r.raise_for_status()
             return pd.read_html(StringIO(r.text))
 
+        # col_hint: which column name(s) to look for in that page's table
         sources = [
-            ('S&P 500',    'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'),
-            ('NASDAQ 100', 'https://en.wikipedia.org/wiki/Nasdaq-100'),
+            ('S&P 500',    'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies', ('symbol','ticker','ticker symbol')),
+            ('S&P 400',    'https://en.wikipedia.org/wiki/List_of_S%26P_400_companies', ('symbol','ticker','ticker symbol')),
+            ('NASDAQ 100', 'https://en.wikipedia.org/wiki/Nasdaq-100',                  ('symbol','ticker','ticker symbol')),
         ]
-        for label, url in sources:
+        for label, url, col_hints in sources:
             try:
                 tables = _wiki(url)
                 for tbl in tables:
                     for col in tbl.columns:
-                        if str(col).lower() in ('symbol', 'ticker', 'ticker symbol'):
+                        if str(col).lower() in col_hints:
                             for sym in tbl[col].tolist():
                                 s = str(sym).replace('.', '-').strip().upper()
                                 if s and s.lower() != 'nan' and 1 <= len(s) <= 6:
