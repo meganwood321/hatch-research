@@ -1,75 +1,52 @@
-# Hatch Research - Claude Notes
+## Hatch Research — CLAUDE NOTES
+Last updated: 2026-08-23
 
 ## Project Overview
-Stock research web app for NASDAQ & NYSE shares (traded via Hatch platform NZ). Scores stocks on fundamentals weighted by research-backed predictive strength. Supports manual ticker lookup, side-by-side comparison, and full exchange scanning.
+Two-component stock research tool for NASDAQ/NYSE shares tradeable via NZ's Hatch platform:
+1. hatch-research (this repo) — scan.py Python scanner + GitHub Actions automation
+2. hatch-mobile — web app hosted on GitHub Pages (separate repo)
 
-## Current State (2026-04-07)
-- v1.2: added news sentiment analysis feature
-- Flask app on localhost:5001
-- yfinance for all stock data (no API key needed)
-- **Curated ticker universe**: S&P 500/400/600 + Russell 1000/2000 fetched
-  from Wikipedia via pandas.read_html, cached 7 days in
-  cache/curated_tickers.json (~2500 tickers). Falls back to embedded list
-  if Wikipedia fetch fails.
-- **Parallel scanning**: ThreadPoolExecutor with SCAN_WORKERS=10
-- **Skip recommendations during scan**: halves per-ticker fetch time; full
-  data (incl. analyst recs) is still fetched for lookup/compare routes
-- **Ineligibility cache**: cache/ineligible.json tracks tickers known to be
-  below $300M mcap / 100k volume, 30-day TTL. Subsequent scans skip these.
-- **News Sentiment**: FinBERT-powered sentiment analysis on Finnhub articles.
-  Shows overall sentiment, daily trend chart, source breakdown, and
-  article list with per-article scores. Triggered on ticker lookup or via
-  "News" button in results table. Cached 6 hours per ticker.
-  - Relevance filter: drops articles that don't mention the ticker/company
-  - Article links use Google search (Finnhub free tier URLs are broken)
-  - Falls back to keyword-based sentiment if FinBERT not available
-- 24-hour cache for stock data in cache/ folder
-- Python path: C:\Users\Megan\AppData\Local\Programs\Python\Python312\python.exe
+## Repos
+- Scanner: https://github.com/meganwood321/hatch-research (PUBLIC)
+- Web app: https://github.com/meganwood321/hatch-mobile (PUBLIC)
+- Live app: https://meganwood321.github.io/hatch-mobile/
+
+## Current State
+### scan.py
+- Scans S&P 500 + S&P 400 + NASDAQ 100 (~900 tickers)
+- 8 parallel workers, retry with backoff
+- Saves scan_results.json + scan_results.csv
+- Run with: python scan.py
+- OR double-click Run Scan.bat
+
+### GitHub Actions (.github/workflows/scan.yml)
+- Runs automatically every weekday at 6pm UTC (7am NZT)
+- Commits scan_results.json + scan_results.csv back to repo
+- Can be triggered manually from GitHub Actions tab
+- Web app fetches results from raw.githubusercontent.com
+
+### Hatch Mobile web app (separate repo: C:\ClaudeProjects\Hatch Mobile)
+- Two tabs: Value Screen (default, left) + Stock Lookup (right)
+- Value Screen auto-fetches scan_results.json from GitHub on open
+- Filters split into Business Quality + Valuation & Pricing groups
+- Staleness warning if data >3 days old on a weekday
+- Score sync: Lookup tab uses yfinance scan score when available
+- Warns when looked-up ticker was not in last scan
+- Responsive: 2-col filter grid on mobile, auto-expand on desktop
+- Title: "Stock Research · NASDAQ & NYSE"
+
+## Scoring System (100pts total)
+- Business Quality (35): FCF margin, ROE, revenue growth, net margin
+- Financial Strength (20): D/E ratio, current ratio, FCF positive
+- Valuation (25): PEG, forward P/E, P/B, trailing P/E
+- Analyst Sentiment (20): upside to target, 52wk position
+
+## APIs
+- Finnhub: free key needed, saved in localStorage in web app
+- yfinance: no key needed, used only in scan.py
 
 ## Key Files
-- `hatch_research.py` — Main app (data fetching, scoring, Flask routes)
-- `news_sentiment.py` — FinBERT sentiment engine (fetch, score, aggregate, cache)
-- `templates/dashboard.html` — Browser UI (dark theme)
-- `cache/` — Cached stock data + news sentiment as JSON (gitignored)
-- `finnhub_key.txt` — Finnhub API key (needed for news sentiment; gitignored)
-- `requirements.txt` — yfinance, flask, requests, lxml, transformers, torch
-
-## Scoring System (100 points max)
-Weighted by research-backed predictive strength:
-- **Business Quality (35 pts)**: FCF margin (12), ROE (12), revenue growth (8), profit margin (3)
-- **Valuation (25 pts)**: PEG (10), forward P/E (8), P/B (4), trailing P/E (3)
-- **Financial Strength (20 pts)**: D/E (8), current ratio (6), FCF positive (6)
-- **Market Sentiment (20 pts)**: analyst buy% (8), price vs target (6), 52-wk position (6)
-- Dividends, beta, payout ratio shown but not scored (weak predictors)
-
-## Hatch Eligibility Filters
-- Market cap > $300M USD
-- Average daily volume > 100k shares
-- Listed on NASDAQ or NYSE
-
-## Data Sources
-- yfinance (Yahoo Finance): all fundamentals, analyst data, price data. No API key.
-- Finnhub (optional): full exchange ticker lists. Free key, 60 req/min, no daily cap.
-
-## Architecture
-- Flask web app on port 5001
-- Background threading for exchange scans
-- JSON file caching (24-hour validity)
-- Dark theme matching other projects
-
-## What Was Done This Session (2026-04-07)
-- Rebuilt scanner: curated index lists, parallel fetching, ineligibility cache
-  → Scan time from hours to <60 seconds
-- Expanded curated universe to ~2500 tickers (S&P 500/400/600 + Russell 1000/2000)
-- Fixed Wikipedia 403 (added User-Agent header)
-- Fixed colorValHigh() missing JS function (scan results weren't rendering)
-- Added news sentiment feature: FinBERT + Finnhub articles
-- Added relevance filter for news (Finnhub returns irrelevant articles)
-- Fixed article links (Finnhub URLs broken, using Google search instead)
-
-## Next Steps
-- User testing of sentiment feature across more tickers
-- Feedback on scoring thresholds
-- Potential: watchlist persistence, desktop shortcut, startup entry
-- Potential: tune SCAN_WORKERS if yfinance rate-limits under load
-- Potential: Marketaux fallback for tickers with sparse Finnhub coverage
+- scan.py — lean scanner script
+- Run Scan.bat — double-click launcher (also on Desktop)
+- .github/workflows/scan.yml — GitHub Actions workflow
+- scan_results.json — output consumed by web app (also committed by Actions)
